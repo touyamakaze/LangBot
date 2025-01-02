@@ -24,7 +24,6 @@ required_paths = [
     "data/scenario",
     "data/logs",
     "data/config",
-    "data/labels",
     "plugins"
 ]
 
