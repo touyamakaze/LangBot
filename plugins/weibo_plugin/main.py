@@ -1,7 +1,7 @@
 import asyncio
 import os
 from pkg.platform.types import MessageChain, Plain, Image
-from pkg.plugin.context import register, handler, BasePlugin, APIHost, EventContext
+from pkg.plugin.context import register, BasePlugin, APIHost
 from pkg.plugin.events import *  # 导入事件类
 from pkg.plugin.models import on
 from plugins.weibo_plugin.config import ban_msgs, weibo_config, admin_qq
@@ -269,17 +269,14 @@ def stop_task(task_event, logger):
 
 
 # 注册插件
-@register(name="Weibo", description="微博订阅", version="0.1", author="TouyamaKaze")
+@register(name="Weibo", description="微博订阅", version="0.1", author="Touyama")
 class MyPlugin(BasePlugin):
+
     task_event = None
 
     # 插件加载时触发
     def __init__(self, host: APIHost):
         self.task_event = threading.Event()
-
-    # # 异步初始化
-    # async def initialize(self):
-    #     pass
 
     # 当收到个人消息时触发
     @on(PersonCommandSent)
@@ -291,12 +288,6 @@ class MyPlugin(BasePlugin):
             start_task(sched.scheduler(time.time, time.sleep), self.task_event, self.ap.logger, event)
 
             event.add_return("reply", "微博订阅任务已加载")
-
-    # @handler(PersonNormalMessageReceived)
-    # async def person_normal_message_received(self, ctx: EventContext):
-    #     msg = ctx.event.text_message  # 这里的 event 即为 PersonNormalMessageReceived 的对象
-    #     if msg == "weibo":  # 如果消息为weibo
-    #         start_task(sched.scheduler(time.time, time.sleep),self.task_event,self.ap.logger,ctx)
 
     # 插件卸载时触发
     def __del__(self):
