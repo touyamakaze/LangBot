@@ -215,6 +215,28 @@ class EventContext:
             message=message
         )
 
+    async def send_person_message (
+            self,
+            target_id: str,
+            message: platform_message.MessageChain
+    ):
+        await self.send_message(
+            target_type="person",
+            target_id=target_id,
+            message=message
+        )
+
+    async def send_group_message (
+            self,
+            target_id: str,
+            message: platform_message.MessageChain
+    ):
+        await self.send_message(
+        target_type="group",
+        target_id=target_id,
+        message=message
+    )
+
     def prevent_postorder(self):
         """阻止后续插件执行"""
         self.__prevent_postorder__ = True
