@@ -61,8 +61,8 @@
             "version": "0.1",
             "author": "Touyama",
             "source": "",
-            "main_file": "plugins/weibo_plugin/main.py",
-            "pkg_path": "plugins/weibo_plugin/",
+            "main_file": "plugins/weibo/main.py",
+            "pkg_path": "plugins/weibo/",
             "priority": 0,
             "enabled": true
         }

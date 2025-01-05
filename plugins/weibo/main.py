@@ -1,11 +1,11 @@
-import asyncio
-import os
+from plugins.weibo.weibo_util import *
 from pkg.platform.types import MessageChain, Plain, Image
 from pkg.plugin.context import register, BasePlugin, APIHost
 from pkg.plugin.events import *  # 导入事件类
 from pkg.plugin.models import on
-from plugins.weibo_plugin.config import ban_msgs, weibo_config, admin_qq
+from plugins.weibo.config import ban_msgs, weibo_config, admin_qq
 from pkg.plugin.host import EventContext, PluginHost
+import asyncio
 import json
 import requests
 import re
@@ -23,94 +23,10 @@ msg_ids = []  # 存储用户发布的微博消息id
 ALL_NUM = 10  # 获取用户发布的最新ALL_NUM条内容
 CHECK_NUM = 5  # 检测前CHECK_NUM条内容是否有更新
 poll_time = 300  # 每隔5分钟执行一次
-pic_save_path = "plugins\\weibo_plugin\\download\\"
 
 
-def has_ban_msg(msg):
-    for ban_msg in ban_msgs:
-        if ban_msg in msg:
-            return True
-    return False
-
-
-def has_effect_msg(msg, effect_msgs):
-    for effect_msg in effect_msgs:
-        if effect_msg in msg:
-            return True
-    return False
-
-
-# 去除无效信息
-# 包括：结尾所有的“#”包含的tag内容,结尾的“全文”,以及“视频”字样
-def content_processing(content, tag):
-    end = "..." if "...全文" in content else ""
-    text = content.replace("...全文", "").replace("{}的微博视频".format(tag), "").rstrip()
-
-    while text.endswith('#'):
-        last_hash_index = text.rfind('#')  # 找到最后一个“#”的索引
-        if last_hash_index > 0:  # 确保“#”不是字符串的第一个字符
-            prev_hash_index = text.rfind('#', 0, last_hash_index - 1)  # 找到倒数第二个“#”的索引
-            if prev_hash_index != -1:  # 确保找到了倒数第二个#
-                text = text[:prev_hash_index] + text[last_hash_index + 1:]  # 删除最后一对“#”及其内容
-            else:
-                text = text[:last_hash_index]  # 如果没有找到倒数第二个“#”，则删除最后一个“#”
-        else:
-            text = text[:-1]  # 如果“#”是字符串的第一个字符，则删除最后一个“#”
-        text = text.rstrip()
-    return text.rstrip() + end
-
-
-# 递归下载方法，最多重试 3 次
-def download_image_retry(url, save_path, logger, retries=3) -> bool:
-    try:
-        # 发送 GET 请求
-        response = requests.get(url, stream=True)
-
-        # 如果请求成功（状态码 200），则保存文件
-        if response.status_code == 200:
-            with open(save_path, "wb") as file:
-                for chunk in response.iter_content(1024):  # 每次读取 1KB
-                    file.write(chunk)
-            logger.info("图片已成功保存到 {}".format(save_path))
-            return True
-        else:
-            logger.info("下载失败，状态码: {}".format(response.status_code))
-            raise Exception("下载失败")
-
-    except Exception as e:
-        # 打印错误信息
-        logger.info("下载出现错误: {}".format(e))
-
-        # 如果重试次数大于 0，继续递归调用
-        if retries > 0:
-            logger.info("重试中... 剩余重试次数: {}".format(retries))
-            time.sleep(2)  # 等待 2 秒后重试
-            return download_image_retry(url, save_path, logger, retries - 1)
-        else:
-            logger.info("达到最大重试次数，下载失败")
-            return False
-
-
-def download_image(url, logger):
-    # 获取当前项目的根目录（假设当前目录为项目根目录）
-    current_dir = os.getcwd()
-
-    # 指定保存路径，保存在 download 文件夹下
-    save_dir = os.path.join(current_dir, pic_save_path)
-
-    # 如果 download 文件夹不存在，则创建该文件夹
-    os.makedirs(save_dir, exist_ok=True)
-
-    # 获取文件名（从 URL 提取）组装完成保存路径
-    save_path = os.path.join(save_dir, url.split("/")[-1])
-
-    if download_image_retry(url, save_path, logger):
-        return save_path
-    else:
-        return None
-
-
-def get_msgs(config, logger) -> list:
+# 获取微博信息
+def get_msgs(config, logger, retries=3) -> list:
     tag = config['tag']
     effect_msgs = []
     if 'effectMsgs' in config:
@@ -155,18 +71,19 @@ def get_msgs(config, logger) -> list:
                     content_text = content_str.split('<')[0]
                     content_html = content_str[len(content_text):]
                     content_html = re.sub(r'<.*?>', '', content_html)
-                    publish_content = '\n' + content_text + content_html
+                    publish_content = content_text + content_html
                     if has_ban_msg(publish_content):
                         continue
                     if len(effect_msgs) != 0 and not has_effect_msg(publish_content, effect_msgs):
                         continue
-                    result_msgs.append(Plain(content_processing(publish_content, tag)))
+                    result_msgs.append(Plain('\n' + content_processing(publish_content, tag, url)))
 
                 # 图片
                 if user_content.get('original_pic'):
                     pic_url = user_content['original_pic']
+                    pic_ids = user_content['pic_ids']
                     result_msgs.append(Plain("\n"))
-                    pic_path = download_image(pic_url, logger)
+                    pic_path = get_image(pic_url, pic_ids, logger)
                     if pic_path:
                         result_msgs.append(Image(path=pic_path))
 
@@ -181,25 +98,38 @@ def get_msgs(config, logger) -> list:
                         retweeted_content_text = retweeted_content_str.split('<')[0]
                         retweeted_content_html = retweeted_content_str[len(retweeted_content_text):]
                         retweeted_content_html = re.sub(r'<.*?>', '', retweeted_content_html)
-                        retweeted_publish_content = '\n\n>转发微博内容：\n' + retweeted_content_text + retweeted_content_html
+                        retweeted_publish_content = retweeted_content_text + retweeted_content_html
                         if has_ban_msg(retweeted_publish_content):
                             continue
-                        result_msgs.append(Plain(content_processing(retweeted_publish_content, tag)))
+                        result_msgs.append(
+                            Plain('\n\n>转发微博内容：\n' + content_processing(retweeted_publish_content, tag, url)))
 
                     # 转发微博图片
                     if retweeted_content.get('original_pic'):
                         retweeted_pic_url = retweeted_content['original_pic']
+                        retweeted_pic_ids = retweeted_content['pic_ids']
                         result_msgs.append(Plain("\n"))
-                        retweeted_pic_path = download_image(retweeted_pic_url, logger)
+                        retweeted_pic_path = get_image(retweeted_pic_url, retweeted_pic_ids, logger)
                         if retweeted_pic_path:
                             result_msgs.append(Image(path=retweeted_pic_path))
+
+                    # 转发视频图片
+                    if retweeted_content.get('page_info') and (
+                            retweeted_content.get('page_info').get('type') == 'video'):
+                        retweeted_page_info = retweeted_content.get('page_info')
+                        if retweeted_page_info.get('page_pic') and retweeted_page_info.get('page_pic').get('url'):
+                            retweeted_page_pic_url = retweeted_page_info.get('page_pic').get('url')
+                            retweeted_page_pic_path = get_image(retweeted_page_pic_url, None, logger)
+                            if retweeted_page_pic_path:
+                                result_msgs.append(Plain("\n"))
+                                result_msgs.append(Image(path=retweeted_page_pic_path))
 
                 # 含有视频图片
                 if user_content.get('page_info') and (user_content.get('page_info').get('type') == 'video'):
                     page_info = user_content.get('page_info')
                     if page_info.get('page_pic') and page_info.get('page_pic').get('url'):
                         page_pic_url = page_info.get('page_pic').get('url')
-                        page_pic_path = download_image(page_pic_url, logger)
+                        page_pic_path = get_image(page_pic_url, None, logger)
                         if page_pic_path:
                             result_msgs.append(Plain("\n"))
                             result_msgs.append(Image(path=page_pic_path))
@@ -271,7 +201,6 @@ def stop_task(task_event, logger):
 # 注册插件
 @register(name="Weibo", description="微博订阅", version="0.1", author="Touyama")
 class MyPlugin(BasePlugin):
-
     task_event = None
 
     # 插件加载时触发

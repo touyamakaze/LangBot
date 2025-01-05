@@ -117,7 +117,6 @@ def stop_task(task_event, logger):
 # 注册插件
 @register(name="MoveFiles", description="自动移动Bangumi番剧文件", version="0.1", author="Touyama")
 class MyPlugin(BasePlugin):
-
     task_event = None
 
     # 插件加载时触发
